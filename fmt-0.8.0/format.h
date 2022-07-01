@@ -41,6 +41,8 @@
 #include <stdexcept>
 #include <string>
 #include <sstream>
+// 下面是我加的
+#include <iostream>
 
 #ifdef __GNUC__
 # define FMT_GCC_VERSION (__GNUC__ * 100 + __GNUC_MINOR__)
@@ -90,18 +92,14 @@ namespace internal {
   
 enum { INLINE_BUFFER_SIZE = 500 };
 
-#if _SECURE_SCL
-template <typename T>
-inline stdext::checked_array_iterator<T*> CheckPtr(T *ptr, std::size_t size) {
-  return stdext::checked_array_iterator<T*>(ptr, size);
-}
-#else
 template <typename T>
 inline T *CheckPtr(T *ptr, std::size_t) { return ptr; }
-#endif
 
 // A simple array for POD types with the first SIZE elements stored in
 // the object itself. It supports a subset of std::vector's operations.
+// 意思是刚开始的 SIZE 元素存放在 Array 对象内部
+// 如果 Array 在栈上的话, 那么这 SIZE 个元素也在栈上, 栈的效率要比堆高
+// 这就是和 vector 的区别
 template <typename T, std::size_t SIZE>
 class Array {
  private:
@@ -119,6 +117,7 @@ class Array {
  public:
   Array() : size_(0), capacity_(SIZE), ptr_(data_) {}
   ~Array() {
+    // 初始化时 ptr_ 是指向 data_, 当空间不足时, ptr_ 指向 new 出来的新空间
     if (ptr_ != data_) delete [] ptr_;
   }
 
@@ -149,6 +148,7 @@ class Array {
   }
 
   // Appends data to the end of the array.
+  // 添加多个数据
   void append(const T *begin, const T *end);
 
   T &operator[](std::size_t index) { return ptr_[index]; }
@@ -157,11 +157,15 @@ class Array {
 
 template <typename T, std::size_t SIZE>
 void Array<T, SIZE>::Grow(std::size_t size) {
+  // 增长至少 1.5 倍
   capacity_ = (std::max)(size, capacity_ + capacity_ / 2);
   T *p = new T[capacity_];
+  // ptr_ 的内容拷贝到 p
   std::copy(ptr_, ptr_ + size_, CheckPtr(p, capacity_));
+  // 释放 ptr_ 指向的空间
   if (ptr_ != data_)
     delete [] ptr_;
+  // ptr_ 指向新的空间
   ptr_ = p;
 }
 
@@ -180,11 +184,7 @@ class CharTraits;
 template <typename Char>
 class BasicCharTraits {
  public:
-#if _SECURE_SCL
-  typedef stdext::checked_array_iterator<Char*> CharPtr;
-#else
   typedef Char *CharPtr;
-#endif
 };
 
 template <>
@@ -224,12 +224,14 @@ template <>
 struct TypeSelector<false> { typedef uint64_t Type; };
 
 // Checks if a number is negative - used to avoid warnings.
+// 先通过 is_sign 判断是不是有符号的
+// 如果没有符号, 那么肯定不是负数
 template <bool IsSigned>
 struct SignChecker {
   template <typename T>
   static bool IsNegative(T) { return false; }
 };
-
+// 如果有符号, 那么需要和 0 进行比较
 template <>
 struct SignChecker<true> {
   template <typename T>
@@ -247,6 +249,8 @@ template <typename T>
 struct IntTraits {
   // Smallest of uint32_t and uint64_t that is large enough to represent
   // all values of T.
+  // 判断类型的位数是否小于等于 32, 如果小于等于 MainType 为 uint32_t
+  // 如果大于 MainType 为 uint64_t
   typedef typename
     TypeSelector<std::numeric_limits<T>::digits <= 32>::Type MainType;
 };
@@ -309,6 +313,9 @@ void FormatDecimal(Char *buffer, UInt value, unsigned num_digits) {
     // Integer division is slow so do it for a group of two digits instead
     // of for every digit. The idea comes from the talk by Alexandrescu
     // "Three Optimization Tips for C++". See speed-test for a comparison.
+    // 比如 value 为 101, 101 % 100 = 1, index = 1 * 2 = 2
+    // DIGITS[3] = 1, DIGITS[2] = 0
+    // DIGITS 表示 00-99, 每个数字用两个字节表示
     unsigned index = (value % 100) * 2;
     value /= 100;
     buffer[num_digits] = internal::DIGITS[index + 1];
@@ -374,6 +381,7 @@ class BasicStringRef {
     Returns the string size.
    */
   std::size_t size() const {
+    // 这个 length() 里面直接调用 strlen
     if (size_ == 0) size_ = std::char_traits<Char>::length(data_);
     return size_;
   }
@@ -417,6 +425,7 @@ struct WidthSpec {
   unsigned width_;
   // Fill is always wchar_t and cast to char if necessary to avoid having
   // two specialization of WidthSpec and its subclasses.
+  // wchar_t 我的机器上占 4 个字节, 可以保存国际化字符的 unicode
   wchar_t fill_;
 
   WidthSpec(unsigned width, wchar_t fill) : width_(width), fill_(fill) {}
@@ -438,6 +447,7 @@ struct AlignSpec : WidthSpec {
 // An alignment and type specifier.
 template <char TYPE>
 struct AlignTypeSpec : AlignSpec {
+  // 也没加个 align 参数, 没体现类名的作用啊
   AlignTypeSpec(unsigned width, wchar_t fill) : AlignSpec(width, fill) {}
 
   bool sign_flag() const { return false; }
@@ -651,11 +661,7 @@ class BasicWriter {
 
   typedef typename internal::CharTraits<Char>::CharPtr CharPtr;
 
-#if _SECURE_SCL
-  static Char *GetBase(CharPtr p) { return p.base(); }
-#else
   static Char *GetBase(Char *p) { return p; }
-#endif
 
   static CharPtr FillPadding(CharPtr buffer,
       unsigned total_size, std::size_t content_size, wchar_t fill);
@@ -686,8 +692,7 @@ class BasicWriter {
 
   // Formats a string.
   template <typename StringChar>
-  CharPtr FormatString(
-      const StringChar *s, std::size_t size, const AlignSpec &spec);
+  CharPtr FormatString(const StringChar *s, std::size_t size, const AlignSpec &spec);
 
   // This method is private to disallow writing a wide string to a
   // char stream and vice versa. If you want to print a wide string
@@ -857,6 +862,8 @@ typename BasicWriter<Char>::CharPtr BasicWriter<Char>::FormatString(
   return out;
 }
 
+// int, unsigned int, long, unsigned long, 
+// long long, unsigned long long 都会走到这里
 template <typename Char>
 template <typename T, typename Spec>
 void BasicWriter<Char>::FormatInt(T value, const Spec &spec) {
@@ -868,75 +875,91 @@ void BasicWriter<Char>::FormatInt(T value, const Spec &spec) {
     sign = '-';
     ++size;
     abs_value = 0 - abs_value;
-  } else if (spec.sign_flag()) {
+  } 
+  // sign_flag 和 plus_flag 功能是不是重合了
+  else if (spec.sign_flag()) {
     sign = spec.plus_flag() ? '+' : ' ';
     ++size;
   }
   switch (spec.type()) {
-  case 0: case 'd': {
-    unsigned num_digits = internal::CountDigits(abs_value);
-    CharPtr p =
-        PrepareFilledBuffer(size + num_digits, spec, sign) + 1 - num_digits;
-    internal::FormatDecimal(GetBase(p), abs_value, num_digits);
-    break;
-  }
-  case 'x': case 'X': {
-    UnsignedType n = abs_value;
-    bool print_prefix = spec.hash_flag();
-    if (print_prefix) size += 2;
-    do {
-      ++size;
-    } while ((n >>= 4) != 0);
-    Char *p = GetBase(PrepareFilledBuffer(size, spec, sign));
-    n = abs_value;
-    const char *digits = spec.type() == 'x' ?
-        "0123456789abcdef" : "0123456789ABCDEF";
-    do {
-      *p-- = digits[n & 0xf];
-    } while ((n >>= 4) != 0);
-    if (print_prefix) {
-      *p-- = spec.type();
-      *p = '0';
+    // 0 是默认情况
+    case 0: 
+    case 'd': {
+      unsigned num_digits = internal::CountDigits(abs_value);
+      // 最后的 1 - num_digits 很突兀
+      // PrepareFilledBuffer 返回的指针指向整数的最后一个字符
+      // 这里 1 - num_digits 让 p 回到第一个字符
+      CharPtr p = PrepareFilledBuffer(size + num_digits, spec, sign) + 1 - num_digits;
+      // p 指向存放整数第一个字符的位置, 把整数按十进制写入 buffer
+      internal::FormatDecimal(GetBase(p), abs_value, num_digits);
+      break;
     }
-    break;
-  }
-  case 'b': case 'B': {
-    UnsignedType n = abs_value;
-    bool print_prefix = spec.hash_flag();
-    if (print_prefix) size += 2;
-    do {
-      ++size;
-    } while ((n >>= 1) != 0);
-    Char *p = GetBase(PrepareFilledBuffer(size, spec, sign));
-    n = abs_value;
-    do {
-      *p-- = '0' + (n & 1);
-    } while ((n >>= 1) != 0);
-    if (print_prefix) {
-      *p-- = spec.type();
-      *p = '0';
+    case 'x': 
+    case 'X': {
+      UnsignedType n = abs_value;
+      bool print_prefix = spec.hash_flag();
+      // 有 # 符号, 那么输出要加上 0x 两个字符
+      if (print_prefix) size += 2;
+      // 计算用多少个十六进制数表示, 每个十六进制数为 1 个字符
+      do {
+        ++size;
+      } while ((n >>= 4) != 0);
+      // p 指向存放整数最后一个字符的位置
+      Char *p = GetBase(PrepareFilledBuffer(size, spec, sign));
+      n = abs_value;
+      const char *digits = spec.type() == 'x' ?
+          "0123456789abcdef" : "0123456789ABCDEF";
+      // 从后往前写
+      do {
+        *p-- = digits[n & 0xf];
+      } while ((n >>= 4) != 0);
+      // 写入 0x 或者 0X
+      if (print_prefix) {
+        *p-- = spec.type();
+        *p = '0';
+      }
+      break;
     }
-    break;
-  }
-  case 'o': {
-    UnsignedType n = abs_value;
-    bool print_prefix = spec.hash_flag();
-    if (print_prefix) ++size;
-    do {
-      ++size;
-    } while ((n >>= 3) != 0);
-    Char *p = GetBase(PrepareFilledBuffer(size, spec, sign));
-    n = abs_value;
-    do {
-      *p-- = '0' + (n & 7);
-    } while ((n >>= 3) != 0);
-    if (print_prefix)
-      *p = '0';
-    break;
-  }
-  default:
-    internal::ReportUnknownType(spec.type(), "integer");
-    break;
+    case 'b': 
+    case 'B': {
+      UnsignedType n = abs_value;
+      // 如果有 #, 输出最前面加上 0b 或者 0B, 两个字节
+      bool print_prefix = spec.hash_flag();
+      if (print_prefix) size += 2;
+      do {
+        ++size;
+      } while ((n >>= 1) != 0);
+      Char *p = GetBase(PrepareFilledBuffer(size, spec, sign));
+      n = abs_value;
+      do {
+        *p-- = '0' + (n & 1);
+      } while ((n >>= 1) != 0);
+      if (print_prefix) {
+        *p-- = spec.type();
+        *p = '0';
+      }
+      break;
+    }
+    case 'o': {
+      UnsignedType n = abs_value;
+      // 如果有 #, 输出最前面加上 o, 一个字符
+      bool print_prefix = spec.hash_flag();
+      if (print_prefix) ++size;
+      do {
+        ++size;
+      } while ((n >>= 3) != 0);
+      Char *p = GetBase(PrepareFilledBuffer(size, spec, sign));
+      n = abs_value;
+      do {
+        *p-- = '0' + (n & 7);
+      } while ((n >>= 3) != 0);
+      if (print_prefix)
+        *p = '0';
+      break;
+    }
+    default:
+      internal::ReportUnknownType(spec.type(), "integer");
+      break;
   }
 }
 
@@ -1097,6 +1120,8 @@ class BasicFormatter {
     }
   };
 
+  // Array 类似于 vector, 只是前 SIZE 个元素保存在元素内部, 所以不一定是在堆上
+  // 也就是 format 字符串之后如果不大于 10 个元素, 那么这些元素都保存在 args_ 内部
   enum { NUM_INLINE_ARGS = 10 };
   internal::Array<const Arg*, NUM_INLINE_ARGS> args_;  // Format arguments.
 
@@ -1157,15 +1182,20 @@ class BasicFormatter {
   // Constructs a formatter with a writer to be used for output and a format
   // string.
   BasicFormatter(BasicWriter<Char> &w, const Char *format = 0)
-  : writer_(&w), format_(format) {}
+  : writer_(&w), format_(format) {
+    std::cout << "BasicFormatter(BasicWriter<Char>&, const Char *)" << std::endl;
+  }
 
 #if FMT_USE_INITIALIZER_LIST
   // Constructs a formatter with formatting arguments.
-  BasicFormatter(BasicWriter<Char> &w,
-      const Char *format, std::initializer_list<Arg> args)
+  // 调用者传进来的 args 可能是各种各样的类型都被转成了 Arg
+  BasicFormatter(BasicWriter<Char> &w, const Char *format, std::initializer_list<Arg> args)
   : writer_(&w), format_(format) {
+    std::cout << "BasicFormatter(BasicWriter<Char>&, const Char *, std::initializer_list<Arg>)" << std::endl;
     // TODO: don't copy arguments
+    // 一次先把空间申请够
     args_.reserve(args.size());
+    // args_ 保存的是指针
     for (const Arg &arg: args)
       args_.push_back(&arg);
   }
@@ -1505,6 +1535,8 @@ std::string Format(const StringRef &format, const Args & ... args) {
 template<typename... Args>
 std::wstring Format(const WStringRef &format, const Args & ... args) {
   WWriter w;
+  // args 竟然能封在 {} 里面作为 initializer_list, args 的类型可能不同的啊
+  // 参数传递时会转成 initializer_list<Arg>
   BasicFormatter<wchar_t> f(w, format.c_str(), { args... });
   return fmt::str(f);
 }
