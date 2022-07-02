@@ -856,6 +856,7 @@ typename BasicWriter<Char>::CharPtr BasicWriter<Char>::FormatString(
       std::fill_n(out + size, spec.width() - size, fill);
     }
   } else {
+    // 如果 spec 的宽度小于字符串本身的宽度, 那么字符串有多少个字符打印多少个字符
     out = GrowBuffer(size);
   }
   std::copy(s, s + size, out);
@@ -871,12 +872,13 @@ void BasicWriter<Char>::FormatInt(T value, const Spec &spec) {
   char sign = 0;
   typedef typename internal::IntTraits<T>::MainType UnsignedType;
   UnsignedType abs_value = value;
+  // 如果是负数, 不管有没有加 -, 都会打印 -
   if (internal::IsNegative(value)) {
     sign = '-';
     ++size;
     abs_value = 0 - abs_value;
   } 
-  // sign_flag 和 plus_flag 功能是不是重合了
+  // 如果是正数, 加上 +, 则会打印 +, 加上 ' ', 则会打印 ' '
   else if (spec.sign_flag()) {
     sign = spec.plus_flag() ? '+' : ' ';
     ++size;

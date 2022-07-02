@@ -47,6 +47,10 @@ inline int SignBit(double value) {
 #ifdef signbit
   return signbit(value);
 #else
+  // https://en.cppreference.com/w/cpp/numeric/math/signbit
+  // 浮点数是否为负数, 返回值是 bool 类型
+  // 负数返回 true, 正数返回 false
+  // -0.0 返回 true, 0.0 返回 false
   return std::signbit(value);
 #endif
 }
@@ -64,11 +68,15 @@ inline int IsInf(double x) {
 const char RESET_COLOR[] = "\x1b[0m";
 }
 
+// 调用 snprintf 把格式化后的 double 字符串写到 buffer, 最多写 size - 1 个字节
+// snprintf 返回值要注意, 返回值表示的是完全容纳格式化后的字符串需要的字节数
+// 不是已经写入的字节数, 空间不够时, 也是返回需要的字节数
 template <typename T>
 int fmt::internal::CharTraits<char>::FormatFloat(
     char *buffer, std::size_t size, const char *format,
     unsigned width, int precision, T value) {
   if (width == 0) {
+    // 没有指定精度时, precision 的值为 -1
     return precision < 0 ?
         FMT_SNPRINTF(buffer, size, format, value) :
         FMT_SNPRINTF(buffer, size, format, precision, value);
@@ -133,6 +141,7 @@ void fmt::internal::ReportUnknownType(char code, const char *type) {
 
 // Fills the padding around the content and returns the pointer to the
 // content area.
+// total_size 中间填 content_size, 左右两侧填充 fill
 template <typename Char>
 typename fmt::BasicWriter<Char>::CharPtr
   fmt::BasicWriter<Char>::FillPadding(CharPtr buffer,
@@ -193,19 +202,22 @@ void fmt::BasicWriter<Char>::FormatDouble(
   char type = spec.type();
   bool upper = false;
   switch (type) {
-  case 0:
-    type = 'g';
-    break;
-  case 'e': case 'f': case 'g':
-    break;
-  case 'F':
-    // Fall through.
-  case 'E': case 'G':
-    upper = true;
-    break;
-  default:
-    internal::ReportUnknownType(type, "double");
-    break;
+    case 0:
+      type = 'g';
+      break;
+    case 'e': 
+    case 'f': 
+    case 'g':
+      break;
+      // Fall through.
+    case 'E': 
+    case 'F':
+    case 'G':
+      upper = true;
+      break;
+    default:
+      internal::ReportUnknownType(type, "double");
+      break;
   }
 
   char sign = 0;
@@ -218,11 +230,13 @@ void fmt::BasicWriter<Char>::FormatDouble(
     sign = spec.plus_flag() ? '+' : ' ';
   }
 
+  // value != value 说明是 nan
   if (value != value) {
     // Format NaN ourselves because sprintf's output is not consistent
     // across platforms.
     std::size_t size = 4;
     const char *nan = upper ? " NAN" : " nan";
+    // 如果不需要打印符号, 那么就不需要 nan 最前面的空格
     if (!sign) {
       --size;
       ++nan;
@@ -251,6 +265,7 @@ void fmt::BasicWriter<Char>::FormatDouble(
   std::size_t offset = buffer_.size();
   unsigned width = spec.width();
   if (sign) {
+    // 符号的一个字节也算在 width 中
     buffer_.reserve(buffer_.size() + (std::max)(width, 1u));
     if (width > 0)
       --width;
@@ -258,6 +273,7 @@ void fmt::BasicWriter<Char>::FormatDouble(
   }
 
   // Build format string.
+  // 构建 format string, 调用 sprintf
   enum { MAX_FORMAT_SIZE = 10}; // longest format: %#-*.*Lg
   Char format[MAX_FORMAT_SIZE];
   Char *format_ptr = format;
@@ -266,10 +282,14 @@ void fmt::BasicWriter<Char>::FormatDouble(
   if (spec.hash_flag())
     *format_ptr++ = '#';
   if (spec.align() == ALIGN_CENTER) {
+    // unclear: 居中为啥宽度设为 0
+    // 先当左对齐处理, snprintf 之后会针对性处理
     width_for_sprintf = 0;
   } else {
+    // 不加 -, 默认是右对齐
     if (spec.align() == ALIGN_LEFT)
       *format_ptr++ = '-';
+    // * 表示从后面的参数中读取宽度
     if (width != 0)
       *format_ptr++ = '*';
   }
@@ -278,6 +298,7 @@ void fmt::BasicWriter<Char>::FormatDouble(
     *format_ptr++ = '*';
   }
   if (internal::IsLongDouble<T>::VALUE)
+    // printf 打印 long double 要用 %Lg
     *format_ptr++ = 'L';
   *format_ptr++ = type;
   *format_ptr = '\0';
@@ -287,12 +308,16 @@ void fmt::BasicWriter<Char>::FormatDouble(
   for (;;) {
     std::size_t size = buffer_.capacity() - offset;
     Char *start = &buffer_[offset];
+    // n 表示格式化字符串所需要的字节数
     int n = internal::CharTraits<Char>::FormatFloat(
         start, size, format, width_for_sprintf, precision, value);
+    // 说明现有空间足够容纳格式化后的字符串, 也就是上面写入成功了
     if (n >= 0 && offset + n < buffer_.capacity()) {
       if (sign) {
+        // ALIGN_DEFAULT 默认就是右对齐
         if ((spec.align() != ALIGN_RIGHT && spec.align() != ALIGN_DEFAULT) ||
             *start != ' ') {
+          // 在最上面曾经把 offset 往后挪了一个字符, 给 sign 留了一个字节的空间
           *(start - 1) = sign;
           sign = 0;
         } else {
@@ -300,23 +325,34 @@ void fmt::BasicWriter<Char>::FormatDouble(
         }
         ++n;
       }
+      // 注意 ALIGN_CENTER 时, snprintf 是当左对齐处理的
+      // 所以 n 并没有考虑 width, 现在才开始考虑 width
+      // spec.width() > n 说明要填充 buffer
       if (spec.align() == ALIGN_CENTER &&
           spec.width() > static_cast<unsigned>(n)) {
         unsigned width = spec.width();
         CharPtr p = GrowBuffer(width);
+        // 把 n 的内容挪到 width 的中间
         std::copy(p, p + n, p + (width - n) / 2);
+        // 填充 fill
         FillPadding(p, spec.width(), n, fill);
         return;
       }
+      // 填充 fill
+      // 走到这里要么是左对齐要么是右对齐
+      // 但是下面的逻辑只处理了右对齐的情况, 应该是个 bug
       if (spec.fill() != ' ' || sign) {
         while (*start == ' ')
           *start++ = fill;
         if (sign)
           *(start - 1) = sign;
       }
+      // 这里不会重新申请空间, 只会为了更新下 buffer_ 内部的 size_
       GrowBuffer(n);
       return;
     }
+    // 走到这里说明 buffer 剩余空间不足以容纳格式化字符串
+    // 重新申请空间再解析
     buffer_.reserve(n >= 0 ? offset + n + 1 : 2 * buffer_.capacity());
   }
 }
@@ -382,6 +418,7 @@ inline const typename fmt::BasicFormatter<Char>::Arg
   return *args_[arg_index];
 }
 
+// 检查 spec 对应的 Arg 是有符号的数值类型
 template <typename Char>
 void fmt::BasicFormatter<Char>::CheckSign(const Char *&s, const Arg &arg) {
   char sign = static_cast<char>(*s);
@@ -500,6 +537,7 @@ void fmt::BasicFormatter<Char>::DoFormat() {
       }
       // 只用于数值类型
       // unclear: # 对 double 的作用是啥?
+      // 会把精度打印完整, 如果不足, 填充 0, 默认精度是 6
       if (*s == '#') {
         if (arg.type > LAST_NUMERIC_TYPE)
           ReportError(s, "format specifier '#' requires numeric argument");
@@ -536,7 +574,7 @@ void fmt::BasicFormatter<Char>::DoFormat() {
             ReportError(s, "number is too big in format");
           precision = value;
         } 
-        // 如果是 { 开头说明是一个 Arg 表示精度
+        // 如果是 { 开头说明是用一个 Arg 表示精度
         else if (*s == '{') {
           ++s;
           ++num_open_braces_;
@@ -598,11 +636,13 @@ void fmt::BasicFormatter<Char>::DoFormat() {
 
     // 如果 {} 中没有 :, 走到这里的时 spec 还是默认值
     //   width = 0, type = 0, fill = ' '
+    // 如果 {} 中有 :, 这里的 spec 已经有了相应的设置
     // Format argument.
     switch (arg.type) {
       case INT:
         // 这里调用的是 BasicFormatter::FormatInt()
-        // BasicWriter 内部也有个 FormatInt()
+        // BasicFormatter::FormatInt() 会调用 BasicFormatter::operator<<()
+        // BasicFormatter::operator<<() 会调用 BasicWriter::FormatInt()
         FormatInt(arg.int_value, spec);
         break;
       case UINT:
