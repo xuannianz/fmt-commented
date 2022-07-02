@@ -1348,7 +1348,9 @@ class Formatter : private Action, public BasicFormatter<Char> {
    */
   ~Formatter() FMT_NOEXCEPT(false) {
     if (!inactive_) {
+      // 调用 DoFormat()
       this->CompleteFormatting();
+      // 因为继承自 Action, 这里会调用 Action 的 operator()(const BasicWriter<char>&)
       (*this)(writer_);
     }
   }
@@ -1500,6 +1502,7 @@ class Write {
 // Example:
 //   Print("Elapsed time: {0:.2f} seconds") << 1.23;
 inline Formatter<Write> Print(StringRef format) {
+  // 创建 Formatter 对象 f, f 析构时会调用 Write::operator() 往终端输出
   Formatter<Write> f(format);
   return f;
 }
@@ -1530,6 +1533,8 @@ inline Formatter<ColorWriter> PrintColored(Color c, StringRef format) {
 template<typename... Args>
 std::string Format(const StringRef &format, const Args & ... args) {
   Writer w;
+  // args 竟然能封在 {} 里面作为 initializer_list, args 的类型可能不同的啊
+  // 参数传递时会转成 initializer_list<Arg>
   BasicFormatter<char> f(w, format.c_str(), { args... });
   return fmt::str(f);
 }
@@ -1537,8 +1542,6 @@ std::string Format(const StringRef &format, const Args & ... args) {
 template<typename... Args>
 std::wstring Format(const WStringRef &format, const Args & ... args) {
   WWriter w;
-  // args 竟然能封在 {} 里面作为 initializer_list, args 的类型可能不同的啊
-  // 参数传递时会转成 initializer_list<Arg>
   BasicFormatter<wchar_t> f(w, format.c_str(), { args... });
   return fmt::str(f);
 }

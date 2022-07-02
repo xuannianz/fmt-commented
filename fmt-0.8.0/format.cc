@@ -64,7 +64,7 @@ inline int IsInf(double x) {
 }
 
 #define FMT_SNPRINTF snprintf
-
+// 改成 "\033[0m" 用八进制表示第一个字符更熟悉
 const char RESET_COLOR[] = "\x1b[0m";
 }
 
@@ -142,6 +142,7 @@ void fmt::internal::ReportUnknownType(char code, const char *type) {
 // Fills the padding around the content and returns the pointer to the
 // content area.
 // total_size 中间填 content_size, 左右两侧填充 fill
+// 返回值是中间 content 的第一个位置
 template <typename Char>
 typename fmt::BasicWriter<Char>::CharPtr
   fmt::BasicWriter<Char>::FillPadding(CharPtr buffer,
@@ -160,7 +161,9 @@ template <typename Char>
 typename fmt::BasicWriter<Char>::CharPtr
   fmt::BasicWriter<Char>::PrepareFilledBuffer(
     unsigned size, const AlignSpec &spec, char sign) {
+  // size 是算上符号后字符串的长度
   unsigned width = spec.width();
+  // 宽度小于所需长度, 说明不需要填充
   if (width <= size) {
     CharPtr p = GrowBuffer(size);
     *p = sign;
@@ -176,11 +179,15 @@ typename fmt::BasicWriter<Char>::CharPtr
     p += size;
     std::fill(p, end, fill);
   } else if (align == ALIGN_CENTER) {
+    // 注意返回的 p 指向中间 content 的第一个字符
     p = FillPadding(p, width, size, fill);
+    // 写入符号
     *p = sign;
+    // 跳到字符串内容的后一个位置
     p += size;
   } else {
     if (align == ALIGN_NUMERIC) {
+      // 这种对齐方式, 符号和内容分开了, 中间是 fill
       if (sign) {
         *p++ = sign;
         --size;
@@ -442,6 +449,12 @@ void fmt::BasicFormatter<Char>::CheckSign(const Char *&s, const Arg &arg) {
 // precision   ::=  integer | "{" [arg_id] "}"
 // type        ::=  "a" | "A" | "b" | "B" | "c" | "d" | "e" | "E" | "f" | "F" | "g" | "G" |
 //                  "o" | "p" | "s" | "x" | "X"
+// d, o, O, b, B, x, X 用于整数
+// e, f, g, E, F, G 用于浮点数
+// c 用于字符
+// s 字符串
+// p 地址
+// a, A 貌似这个版本还没支持
 template <typename Char>
 void fmt::BasicFormatter<Char>::DoFormat() {
   const Char *start = format_;
@@ -671,6 +684,7 @@ void fmt::BasicFormatter<Char>::DoFormat() {
           internal::ReportUnknownType(spec.type_, "char");
         typedef typename BasicWriter<Char>::CharPtr CharPtr;
         CharPtr out = CharPtr();
+        // 如果要求宽度大于 1, 先填 fill, 再填字符
         if (spec.width_ > 1) {
           Char fill = static_cast<Char>(spec.fill());
           out = writer.GrowBuffer(spec.width_);
@@ -705,6 +719,7 @@ void fmt::BasicFormatter<Char>::DoFormat() {
       case POINTER:
         if (spec.type_ && spec.type_ != 'p')
           internal::ReportUnknownType(spec.type_, "pointer");
+        // 把地址当做整数, 用十六进制加 # 打印
         spec.flags_= HASH_FLAG;
         spec.type_ = 'x';
         FormatInt(reinterpret_cast<uintptr_t>(arg.pointer_value), spec);
@@ -723,10 +738,13 @@ void fmt::BasicFormatter<Char>::DoFormat() {
 }
 
 void fmt::ColorWriter::operator()(const fmt::BasicWriter<char> &w) const {
+  // 改成 "\033[30m" 用八进制表示第一个字符, 更熟悉一点
   char escape[] = "\x1b[30m";
+  // 根据不同颜色设置成 30m, 31m, 32m...
   escape[3] = '0' + static_cast<char>(color_);
   std::fputs(escape, stdout);
   std::fwrite(w.data(), 1, w.size(), stdout);
+  // 恢复使用 \033[0m
   std::fputs(RESET_COLOR, stdout);
 }
 
