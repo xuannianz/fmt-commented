@@ -1185,7 +1185,7 @@ class BasicFormatter {
   // string.
   BasicFormatter(BasicWriter<Char> &w, const Char *format = 0)
   : writer_(&w), format_(format) {
-    std::cout << "BasicFormatter(BasicWriter<Char>&, const Char *)" << std::endl;
+    // std::cout << "BasicFormatter(BasicWriter<Char>&, const Char *)" << std::endl;
   }
 
 #if FMT_USE_INITIALIZER_LIST
@@ -1193,7 +1193,7 @@ class BasicFormatter {
   // 调用者传进来的 args 可能是各种各样的类型都被转成了 Arg
   BasicFormatter(BasicWriter<Char> &w, const Char *format, std::initializer_list<Arg> args)
   : writer_(&w), format_(format) {
-    std::cout << "BasicFormatter(BasicWriter<Char>&, const Char *, std::initializer_list<Arg>)" << std::endl;
+    // std::cout << "BasicFormatter(BasicWriter<Char>&, const Char *, std::initializer_list<Arg>)" << std::endl;
     // TODO: don't copy arguments
     // 一次先把空间申请够
     args_.reserve(args.size());
